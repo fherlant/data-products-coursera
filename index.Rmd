@@ -1,0 +1,54 @@
+---
+title       : GBM with Iris
+subtitle    : Developing Data Products - Coursera Project
+author      : fherlant
+job         : 09/25/2015
+framework   : revealjs        # {io2012, html5slides, shower, dzslides, ...}
+highlighter : highlight.js  # {highlight.js, prettify, highlight}
+hitheme     : tomorrow      # 
+widgets     : []            # {mathjax, quiz, bootstrap}
+mode        : selfcontained # {standalone, draft}
+knit        : slidify::knit2slides
+---
+
+## GBM with Iris
+
+Developing Data Products - Coursera Project
+
+---
+
+## App description
+
+The **GBM with Iris** web app illustrates the capabilities of gradient boosting machines on the iris dataset. The gbm parameters can be set using sliders and drop-down menus as input parameters, and the learning curves and relative influence are plotted as the output of the application.
+
+To access the shiny app, go to https://fherlant.shinyapps.io/gbm-with-iris
+
+---
+
+## Screenshot
+
+
+<div style='text-align: center;'>
+    <img height='500' src='./assets/img/Screenshot.png' />
+</div>
+
+
+---
+
+## Iris Dataset
+
+
+This app relies on `iris`, probably the most well-known dataset for rookie data scientists.
+
+```{r}
+library(datasets)
+str(iris)
+```
+
+
+---
+## Gradient Boosting
+
+For more details on GBM:
+* [R Package "gbm"](https://cran.r-project.org/web/packages/gbm/gbm.pdf)
+* [Gradient boosting (Wikipedia)](https://en.wikipedia.org/wiki/Gradient_boosting)
