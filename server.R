@@ -1,0 +1,157 @@
+library(shiny)
+library(datasets)
+library(gbm); library(reshape2); library(plyr); library(dplyr); library(ggplot2)
+
+shinyServer(function(input, output, session){
+    
+    dat <- reactive({
+        if(!is.null(input$dat.name)){
+            if(input$dat.name=="iris"){
+                dat <- iris
+            } else dat <- NULL
+        } else dat <- NULL
+        dat
+    })
+    
+    output$vars <- renderUI({
+        if(!is.null(dat()))	selectInput("vars", "Explanatory variables:", names(select(dat(),-matches(input$label))), selected=names(select(dat(),-matches(input$label))), multiple=TRUE)
+    })
+    
+    output$n.trees <- renderUI({
+        if(!is.null(dat()))	sliderInput("n.trees", "Number of trees:", 100, 10000, 100, step=100, width="100%")
+    })
+    
+    output$bag.fraction <- renderUI({
+        if(!is.null(dat()))	sliderInput("bag.fraction", "Bag fraction:", 0.1, 1, 0.5, step=0.05, width="100%")
+    })
+    
+    output$train.fraction <- renderUI({
+        if(!is.null(dat()))	sliderInput("train.fraction", "Training fraction:", 0.1, 1, 0.7, step=0.05, width="100%")
+    })
+    
+    output$n.minobsinnode <- renderUI({
+        if(!is.null(dat()))	sliderInput("n.minobsinnode", "Min. obs. in terminal nodes:", 1, 10, 5, step=1, width="100%")
+    })
+    
+    output$cv.folds <- renderUI({
+        if(!is.null(dat()))	sliderInput("cv.folds", "Cross-validation folds:", 1, 10, 3, step=1, width="100%")
+    })
+    
+    output$shrinkage <- renderUI({
+        if(!is.null(dat()))	selectInput("shrinkage", "Shrinkage rate:", choices=c(0.001,0.005,0.01,0.05,0.1), selected=0.05, width="100%")
+    })
+    
+    output$interaction.depth <- renderUI({
+        if(!is.null(dat()))	selectInput("interaction.depth", "Interaction depth:", choices=1:length(input$vars), selected=1, width="100%")
+    })
+    
+    gbm1 <- reactive({
+        if(input$goButton==0) gbm1 <- NULL
+        isolate(
+            if(!is.null(dat()) & length(input$vars)){
+                gbm1 <- isolate(
+                    gbm(
+                        as.formula(paste(names(select(dat(),matches(input$label))),"~",paste(input$vars,collapse="+"))),
+                        data=dat(),
+                        var.monotone=rep(0,length(input$vars)),
+                        distribution="gaussian",
+                        n.trees=input$n.trees,
+                        shrinkage=as.numeric(input$shrinkage),
+                        interaction.depth=as.numeric(input$interaction.depth),
+                        bag.fraction=input$bag.fraction,
+                        train.fraction=input$train.fraction,
+                        n.minobsinnode=input$n.minobsinnode,
+                        cv.folds=input$cv.folds,
+                        n.cores=min(input$cv.folds,4)
+                    )
+                )
+            } else gbm1 <- NULL
+        )
+        gbm1
+    })
+    
+    best.iter <- reactive({
+        if(input$goButton==0) return()
+        isolate(
+            if(!is.null(gbm1())){
+                rnames <- c("Optimal Number of Trees","Training Set Error","Test Set Error")
+                if(input$cv.folds<2){
+                    d <- data.frame(gbm.perf(gbm1(),method="OOB",plot.it=F), gbm.perf(gbm1(),method="test",plot.it=F))
+                    names(d) <- c(paste0(100*(1-input$bag.fraction),"% Out of Bag"),paste0(100*(1-input$train.fraction),"% Test Set"))
+                } else {
+                    d <- data.frame(gbm.perf(gbm1(),method="OOB",plot.it=F), gbm.perf(gbm1(),method="test",plot.it=F), gbm.perf(gbm1(),method="cv",plot.it=F))
+                    names(d) <- c(paste0(100*(1-input$bag.fraction),"% Out of Bag"),paste0(100*(1-input$train.fraction),"% Test Set"),paste0(input$cv.folds,"-fold Cross-Validation"))
+                    rnames <- c(rnames,"Cross-Validation Error")
+                }
+                d1 <- unlist(d[1,])
+                d <- rbind(d, gbm1()$train.error[d1], gbm1()$valid.error[d1])
+                if(input$cv.folds>1) d <- rbind(d,gbm1()$cv.error[d1])
+                hold.names <- names(d)
+                d <- data.frame(rnames,d)
+                names(d) <- c("Measures",hold.names)
+                return(d)
+            } else return()
+        )
+    })
+    
+    ri <- reactive({
+        if(input$goButton==0) return()
+        isolate(
+            if(!is.null(best.iter())){
+                b <- unlist(best.iter()[1,])
+                if(input$cv.folds<2){
+                    ri <- ldply(list("OOB"=summary(gbm1(),n.trees=b[1],order=F,plotit=F),
+                                     "Test"=summary(gbm1(),n.trees=b[2],order=F,plotit=F)), data.frame)
+                    names(ri) <- c("Method","Variable","RI")
+                } else {
+                    ri <- ldply(list("OOB"=summary(gbm1(),n.trees=b[1],order=F,plotit=F),
+                                     "Test"=summary(gbm1(),n.trees=b[2],order=F,plotit=F),
+                                     "CV"=summary(gbm1(),n.trees=b[3],order=F,plotit=F)), data.frame)
+                    names(ri) <- c("Method","Variable","RI")
+                }
+                return(ri)
+            } else return()
+        )
+    })
+    
+    output$BestIterTable <- renderDataTable({ if(!is.null(best.iter())) best.iter() })
+    
+    output$RITable <- renderDataTable({ if(!is.null(ri())) ri() })
+    
+    doPlot.best.iter <- function(...){
+        if(input$goButton==0) plot(0,0,type="n",axes=F,xlab="",ylab="")
+        isolate(
+            if(!is.null(best.iter())){
+                n <- gbm1()$n.trees
+                b <- unlist(best.iter()[1,])
+                d <- data.frame(Trees=1:n,Training.Error=gbm1()$train.error,Test.Error=gbm1()$valid.error)
+                if(input$cv.folds>1) d$CV.Error <- gbm1()$cv.error
+                d <- melt(d,id="Trees")
+                names(d) <- c("Number of Trees","Type of Error","Error")
+                g <- ggplot(d, aes(x=`Number of Trees`,y=Error,group=`Type of Error`,colour=`Type of Error`)) + geom_line()
+                print(g)
+            }
+        )
+    }
+    
+    doPlot.ri <- function(...){
+        if(input$goButton==0) plot(0,0,type="n",axes=F,xlab="",ylab="")
+        isolate(
+            if(!is.null(ri())){
+                g <- ggplot(ri(), aes(Method,RI,fill=Variable)) + geom_bar(stat="identity", position="dodge")
+                print(g)
+            }
+        )
+    }
+    
+    output$no.vars.selected <- renderUI({
+        HTML(paste('<div>','Select at least one explanatory variable to use gradient boosting to estimate the response.','</div>',sep="",collapse=""))
+    })
+    
+    output$PlotBestIter <- renderPlot({ doPlot.best.iter() },
+                                      height=function(){ w <- session$clientData$output_PlotBestIter_width; if(length(w)) return(round(0.6*w)) else return("auto") }, width="auto")
+    
+    output$PlotRI <- renderPlot({ doPlot.ri() },
+                                height=function(){ w <- session$clientData$output_PlotRI_width; if(length(w)) return(round(0.4*w)) else return("auto") }, width="auto")
+    
+} )
